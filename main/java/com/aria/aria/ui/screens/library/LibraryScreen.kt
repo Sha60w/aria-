@@ -34,7 +34,12 @@ import com.aria.aria.ui.components.SongArtwork
 
 
 @Composable
-fun LibraryScreen() {
+fun LibraryScreen(navController: androidx.navigation.NavController) {
+// val navController = androidx.navigation.compose.rememberNavController()
+    // IMPORTANT: this screen is hosted inside the root NavHost; do not create a new nested NavController.
+    // Navigation must use the parent controller; otherwise route pushes can crash/tear down the UI.
+
+
     val context = LocalContext.current
 
     var hasPermission by remember {
@@ -127,91 +132,237 @@ fun LibraryScreen() {
 
             Spacer(modifier = Modifier.height(12.dp))
 
-            val ordered = remember(filtered, sortMode) {
-                when (sortMode) {
-                    SortMode.Songs -> filtered.sortedWith(
-                        compareBy<Song> { it.title.lowercase() }.thenBy { it.artist.lowercase() }
-                    )
+            // Songs tab: keep existing search + sorting behavior.
+            val songsOrdered = remember(filtered) {
+                filtered.sortedWith(
+                    compareBy<Song> { it.title.lowercase() }.thenBy { it.artist.lowercase() }
+                )
+            }
 
-                    SortMode.Artists -> filtered.sortedWith(
-                        compareBy<Song> { it.artist.lowercase() }.thenBy { it.title.lowercase() }
-                    )
+            // Grouped collections for category browser tabs.
+            val artistsMap = remember(filtered) {
+                filtered.groupBy { it.artist.trim().ifBlank { "Unknown" } }
+            }
 
-                    SortMode.Albums -> filtered.sortedWith(
-                        compareBy<Song> { it.album.lowercase() }.thenBy { it.title.lowercase() }
-                    )
+            data class AlbumItem(
+                val album: String,
+                val artist: String,
+                val songs: List<Song>
+            )
 
-                    SortMode.Folders -> filtered
-                }
+            val albumsMap = remember(filtered) {
+                // include artist in the key to avoid album-name collisions across artists
+                filtered.groupBy { "${it.album.trim().ifBlank { "Unknown" }}|||${it.artist.trim().ifBlank { "Unknown" }}" }
+            }
+
+            val foldersMap = remember(filtered) {
+                filtered.groupBy { extractFolderName(it.uri) }
             }
 
             LazyColumn(
                 modifier = Modifier.fillMaxSize(),
                 contentPadding = androidx.compose.foundation.layout.PaddingValues(bottom = 90.dp)
             ) {
-                items(ordered, key = { it.id }) { song ->
-                    PremiumSurface(modifier = Modifier
-                        .padding(horizontal = 12.dp, vertical = 6.dp)
-                        .fillMaxWidth()
-                    ) {
-                        Column(
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .padding(16.dp)
-                                .padding(0.dp)
-                                .run {
-                                    Modifier
-                                }
-                        ) {
-                            // make whole card feel clickable
-                            androidx.compose.foundation.layout.Box(
+                when (sortMode) {
+                    SortMode.Songs -> {
+                        items(songsOrdered, key = { it.id }) { song ->
+                            PremiumSurface(
                                 modifier = Modifier
+                                    .padding(horizontal = 12.dp, vertical = 6.dp)
                                     .fillMaxWidth()
-                                    .clickable {
-                                        // Generate a fresh queue from the current tab's ordered list,
-                                        // so only the selected subset shows up in Now Playing → Queue.
-                                        // Clear previous queue to avoid leftovers.
-                                        playerManager.clearQueue()
-                                        playerManager.setQueue(ordered)
-                                        val startIndex = ordered.indexOfFirst { it.id == song.id }
-                                        if (startIndex >= 0) {
-                                            playerManager.playQueueAt(startIndex, autoplay = true)
-                                        } else {
-                                            // fallback: play single track
-                                            playerManager.playSong(song.title, song.uri, song.artworkUri)
+                            ) {
+                                Column(
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .padding(16.dp)
+                                ) {
+                                    androidx.compose.foundation.layout.Box(
+                                        modifier = Modifier
+                                            .fillMaxWidth()
+                                            .clickable {
+                                                playerManager.clearQueue()
+                                                playerManager.setQueue(songsOrdered)
+                                                val startIndex = songsOrdered.indexOfFirst { it.id == song.id }
+                                                if (startIndex >= 0) {
+                                                    playerManager.playQueueAt(startIndex, autoplay = true)
+                                                } else {
+                                                    playerManager.playSong(song.title, song.uri, song.artworkUri)
+                                                }
+                                            }
+                                    ) {
+                                        Row(
+                                            modifier = Modifier.fillMaxWidth(),
+                                            verticalAlignment = Alignment.CenterVertically
+                                        ) {
+                                            SongArtwork(
+                                                artworkUri = song.artworkUri,
+                                                modifier = Modifier.size(44.dp)
+                                            )
+
+                                            Spacer(modifier = Modifier.width(12.dp))
+
+                                            Column {
+                                                Text(song.title, style = MaterialTheme.typography.titleMedium)
+                                                Spacer(modifier = Modifier.height(4.dp))
+                                                Text(
+                                                    song.artist,
+                                                    style = MaterialTheme.typography.bodySmall,
+                                                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                                                )
+                                            }
                                         }
                                     }
-                            ) {
-                                Row(
-                                    modifier = Modifier.fillMaxWidth(),
-                                    verticalAlignment = Alignment.CenterVertically
-                                ) {
-                                    SongArtwork(
-                                        artworkUri = song.artworkUri,
-                                        modifier = Modifier.size(44.dp)
+
+                                    Text(
+                                        text = "Play",
+                                        style = MaterialTheme.typography.labelLarge,
+                                        color = AriaGold,
+                                        modifier = Modifier.align(Alignment.End)
                                     )
+                                }
+                            }
+                        }
+                    }
 
-                                    Spacer(modifier = Modifier.width(12.dp))
+                    SortMode.Artists -> {
+                        val artistNames = artistsMap.keys.sortedBy { it.lowercase() }
+                        items(artistNames, key = { it }) { artistName ->
+                            val artistSongs = artistsMap[artistName].orEmpty()
+                            if (artistSongs.isEmpty()) return@items
 
-                                    Column {
-                                        Text(song.title, style = MaterialTheme.typography.titleMedium)
-                                        Spacer(modifier = Modifier.height(4.dp))
-                                        Text(
-                                            song.artist,
-                                            style = MaterialTheme.typography.bodySmall,
-                                            color = MaterialTheme.colorScheme.onSurfaceVariant
-                                        )
+                            val artworkUri = artistSongs.firstOrNull()?.artworkUri
+
+                            PremiumSurface(
+                                modifier = Modifier
+                                    .padding(horizontal = 12.dp, vertical = 6.dp)
+                                    .fillMaxWidth()
+                            ) {
+                                Column(
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .padding(16.dp)
+                                ) {
+                                    androidx.compose.foundation.layout.Box(
+                                        modifier = Modifier
+                                            .fillMaxWidth()
+                                            .clickable {
+navController.navigate(
+                                                    "artist_songs/${java.net.URLEncoder.encode(artistName, "UTF-8")}" 
+                                                )
+
+                                            }
+                                    ) {
+                                        Row(
+                                            modifier = Modifier.fillMaxWidth(),
+                                            verticalAlignment = Alignment.CenterVertically
+                                        ) {
+                                            SongArtwork(artworkUri = artworkUri, modifier = Modifier.size(44.dp))
+                                            Spacer(modifier = Modifier.width(12.dp))
+                                            Column(modifier = Modifier.weight(1f)) {
+                                                Text(artistName, style = MaterialTheme.typography.titleMedium, maxLines = 1)
+                                                Spacer(modifier = Modifier.height(4.dp))
+                                                Text(
+                                                    "${artistSongs.size} songs",
+                                                    style = MaterialTheme.typography.bodySmall,
+                                                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                                                )
+                                            }
+                                        }
                                     }
                                 }
-
                             }
+                        }
+                    }
 
-                            Text(
-                                text = "Play",
-                                style = MaterialTheme.typography.labelLarge,
-                                color = AriaGold,
-                                modifier = Modifier.align(Alignment.End)
-                            )
+                    SortMode.Albums -> {
+                        val albumItems = albumsMap.entries.map { (key, songs) ->
+                            val parts = key.split("|||")
+                            val albumName = parts.getOrNull(0)?.trim()?.ifBlank { "Unknown" } ?: "Unknown"
+                            val artistName = parts.getOrNull(1)?.trim()?.ifBlank { "Unknown" } ?: "Unknown"
+                            AlbumItem(album = albumName, artist = artistName, songs = songs)
+                        }.sortedBy { it.album.lowercase() }
+
+                        items(albumItems, key = { it.album + "|||" + it.artist }) { item ->
+                            val artworkUri = item.songs.firstOrNull()?.artworkUri
+
+                            PremiumSurface(
+                                modifier = Modifier
+                                    .padding(horizontal = 12.dp, vertical = 6.dp)
+                                    .fillMaxWidth()
+                            ) {
+                                Column(
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .padding(16.dp)
+                                ) {
+                                    androidx.compose.foundation.layout.Box(
+                                        modifier = Modifier
+                                            .fillMaxWidth()
+                                            .clickable {
+navController.navigate(
+"album_songs/${java.net.URLEncoder.encode(item.album, "UTF-8")}/${java.net.URLEncoder.encode(item.artist, "UTF-8")}"
+                                                )
+                                            }
+                                    ) {
+                                        Row(
+                                            modifier = Modifier.fillMaxWidth(),
+                                            verticalAlignment = Alignment.CenterVertically
+                                        ) {
+                                            SongArtwork(artworkUri = artworkUri, modifier = Modifier.size(44.dp))
+                                            Spacer(modifier = Modifier.width(12.dp))
+                                            Column(modifier = Modifier.weight(1f)) {
+                                                Text(item.album, style = MaterialTheme.typography.titleMedium, maxLines = 1)
+                                                Spacer(modifier = Modifier.height(4.dp))
+                                                Text(
+                                                    "${item.artist} • ${item.songs.size} songs",
+                                                    style = MaterialTheme.typography.bodySmall,
+                                                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                                                )
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+
+                    SortMode.Folders -> {
+                        val folderNames = foldersMap.keys.sortedBy { it.lowercase() }
+                        items(folderNames, key = { it }) { folderName ->
+                            val folderSongs = foldersMap[folderName].orEmpty()
+                            if (folderSongs.isEmpty()) return@items
+
+                            PremiumSurface(
+                                modifier = Modifier
+                                    .padding(horizontal = 12.dp, vertical = 6.dp)
+                                    .fillMaxWidth()
+                            ) {
+                                Column(
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .padding(16.dp)
+                                ) {
+                                    androidx.compose.foundation.layout.Box(
+                                        modifier = Modifier
+                                            .fillMaxWidth()
+                                            .clickable {
+navController.navigate(
+                                                    "folder_songs/${java.net.URLEncoder.encode(folderName ?: "", "UTF-8")}" 
+                                                )
+                                            }
+                                    ) {
+                                        Column {
+                                            Text(folderName, style = MaterialTheme.typography.titleMedium, maxLines = 1)
+                                            Spacer(modifier = Modifier.height(4.dp))
+                                            Text(
+                                                "${folderSongs.size} songs",
+                                                style = MaterialTheme.typography.bodySmall,
+                                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                                            )
+                                        }
+                                    }
+                                }
+                            }
                         }
                     }
                 }
@@ -220,11 +371,24 @@ fun LibraryScreen() {
     }
 }
 
+
 private enum class SortMode {
     Songs,
     Artists,
     Albums,
     Folders
+}
+
+private fun extractFolderName(uri: String): String {
+    return try {
+        val path = android.net.Uri.parse(uri).path ?: return "Unknown"
+        val segments = path.split('/').filter { it.isNotBlank() }
+        if (segments.isEmpty()) return "Unknown"
+        // Use last parent directory as folder name.
+        if (segments.size >= 2) segments[segments.size - 2] else "Root"
+    } catch (_: Exception) {
+        "Unknown"
+    }
 }
 
 private fun StringKey(s: String?): String {
@@ -234,6 +398,7 @@ private fun StringKey(s: String?): String {
 @Composable
 
 private fun FilterChip(
+
     text: String,
     selected: Boolean,
     onClick: () -> Unit

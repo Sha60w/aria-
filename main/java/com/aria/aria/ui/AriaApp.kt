@@ -20,14 +20,18 @@ import com.aria.aria.ui.theme.AriaGold
 import com.aria.aria.ui.theme.AriaGray
 import androidx.compose.foundation.layout.Column
 import androidx.compose.ui.platform.LocalContext
+import androidx.media3.common.util.UnstableApi
 import com.aria.aria.player.PlayerHolder
 import com.aria.aria.ui.components.MiniPlayer
 import com.aria.aria.ui.screens.NowPlayingScreen
 import com.aria.aria.ui.screens.PlaylistScreen
 import com.aria.aria.ui.screens.PlaylistDetailScreen
+import com.aria.aria.ui.screens.library.AlbumSongsScreen
+import com.aria.aria.ui.screens.library.ArtistSongsScreen
+import com.aria.aria.ui.screens.library.FolderSongsScreen
 
 
-
+@androidx.annotation.OptIn(UnstableApi::class)
 @OptIn(ExperimentalAnimationApi::class)
 @Composable
 fun AriaApp() {
@@ -122,7 +126,7 @@ fun AriaApp() {
                 exitTransition = { com.aria.aria.ui.components.PremiumTransitions.exit() },
                 popEnterTransition = { com.aria.aria.ui.components.PremiumTransitions.enter() },
                 popExitTransition = { com.aria.aria.ui.components.PremiumTransitions.exit() }
-            ) { LibraryScreen() }
+            ) { LibraryScreen(navController) }
 
             composable(
                 route = "playlists_tab",
@@ -179,8 +183,70 @@ fun AriaApp() {
                 popExitTransition = { com.aria.aria.ui.components.PremiumTransitions.exit() }
             ) { SettingsScreen() }
 
+            // --- Library drill-down routes ---
+            composable(
+                route = "artist_songs/{artist}"
+            ) { backStackEntry ->
+                val artistEncoded = backStackEntry.arguments?.getString("artist") ?: ""
+                val artist = java.net.URLDecoder.decode(artistEncoded, "UTF-8")
+
+                // Build full songs list and subset on this screen.
+                val allSongs = com.aria.aria.data.MusicScanner().scanSongs(context)
+                ArtistSongsScreen(
+                    player = player,
+                    songs = allSongs,
+                    artist = artist,
+                    onBack = { navController.popBackStack() }
+                )
+            }
+
+            composable(
+                route = "album_songs/{album}/{artist}"
+            ) { backStackEntry ->
+                val albumEncoded = backStackEntry.arguments?.getString("album") ?: ""
+                val artistEncoded = backStackEntry.arguments?.getString("artist") ?: ""
+                val album = java.net.URLDecoder.decode(albumEncoded, "UTF-8")
+                val artist = java.net.URLDecoder.decode(artistEncoded, "UTF-8")
+
+                val allSongs = com.aria.aria.data.MusicScanner().scanSongs(context)
+                AlbumSongsScreen(
+                    player = player,
+                    songs = allSongs,
+                    album = album,
+                    artist = artist,
+                    onBack = { navController.popBackStack() }
+                )
+            }
+
+            composable(
+                route = "folder_songs/{folder}"
+            ) { backStackEntry ->
+                val folderEncoded = backStackEntry.arguments?.getString("folder") ?: ""
+                val folder = java.net.URLDecoder.decode(folderEncoded, "UTF-8")
+
+                val allSongs = com.aria.aria.data.MusicScanner().scanSongs(context)
+                FolderSongsScreen(
+                    player = player,
+                    songs = allSongs,
+                    folderName = folder,
+                    extractFolderName = { uri ->
+                        try {
+                            val path = android.net.Uri.parse(uri).path ?: return@FolderSongsScreen "Unknown"
+                            val segments = path.split('/').filter { it.isNotBlank() }
+                            if (segments.isEmpty()) return@FolderSongsScreen "Unknown"
+                            if (segments.size >= 2) segments[segments.size - 2] else "Root"
+                        } catch (_: Exception) {
+                            "Unknown"
+                        }
+                    },
+                    onBack = { navController.popBackStack() }
+                )
+            }
+
+
             composable(
                 route = "now_playing",
+
                 enterTransition = { com.aria.aria.ui.components.PremiumTransitions.enter() },
                 exitTransition = { com.aria.aria.ui.components.PremiumTransitions.exit() },
                 popEnterTransition = { com.aria.aria.ui.components.PremiumTransitions.enter() },

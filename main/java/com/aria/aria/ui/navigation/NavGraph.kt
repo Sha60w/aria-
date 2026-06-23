@@ -7,8 +7,11 @@ import com.aria.aria.ui.screens.library.LibraryScreen
 import com.aria.aria.ui.screens.search.SearchScreen
 import com.aria.aria.ui.screens.settings.SettingsScreen
 import android.content.Context
+import androidx.annotation.OptIn
+import androidx.media3.common.util.UnstableApi
 import com.aria.aria.player.AriaPlayerManager
 
+@OptIn(UnstableApi::class)
 @Composable
 fun AriaNavGraph(
     player: AriaPlayerManager,
@@ -27,7 +30,7 @@ fun AriaNavGraph(
         }
 
         composable(Screen.Library.route) {
-            LibraryScreen()
+            LibraryScreen(navController)
         }
 
         composable(Screen.Search.route) {

@@ -1,7 +1,7 @@
 package com.aria.aria.player
 
 import android.content.Context
-import android.net.Uri
+
 import androidx.compose.runtime.State
 import androidx.compose.runtime.mutableLongStateOf
 import androidx.compose.runtime.mutableStateOf
@@ -85,6 +85,8 @@ class AriaPlayerManager(context: Context) {
     }
 
     fun playSong(title: String, uri: String, artworkUri: String? = null) {
+        // note: uri is used as mediaId throughout this manager
+
         _currentTitle.value = title
         _artworkUri.value = artworkUri
 
@@ -157,8 +159,15 @@ class AriaPlayerManager(context: Context) {
     }
 
     private fun syncQueueState() {
-        _queueTitles.value = queue.mapNotNull { it.mediaMetadata.title?.toString() }
-        _queueUris.value = queue.map { it.localConfiguration?.uri?.toString() ?: it.mediaId ?: "" }
+        // Use our own cached fields (mediaMetadata/title + mediaId/uri) to avoid ExoPlayer
+        // timing issues around localConfiguration being null right after queue resets.
+        _queueTitles.value = queue
+            .mapNotNull { it.mediaMetadata.title?.toString() }
+            .filter { it.isNotBlank() }
+
+        _queueUris.value = queue
+            .map { it.mediaId ?: it.localConfiguration?.uri?.toString().orEmpty() }
+            .filter { it.isNotBlank() }
     }
 
 
@@ -215,6 +224,26 @@ class AriaPlayerManager(context: Context) {
         val d = _duration.longValue
         if (d <= 0L) return 0f
         return (_currentPosition.longValue.toFloat() / d.toFloat()).coerceIn(0f, 1f)
+    }
+
+    fun playSongInSubsetQueue(subset: List<Song>, tapped: Song, autoplay: Boolean = true) {
+        // behavior desired: clear old queue, create new queue from subset, then start tapped song
+        if (subset.isEmpty()) {
+            playSong(tapped.title, tapped.uri, tapped.artworkUri)
+            return
+        }
+
+        clearQueue()
+        setQueue(subset)
+
+        val tappedUri = tapped.uri
+        val index = subset.indexOfFirst { it.uri == tappedUri }
+        if (index >= 0) {
+            playQueueAt(index, autoplay = autoplay)
+        } else {
+            // fallback
+            playSong(tapped.title, tapped.uri, tapped.artworkUri)
+        }
     }
 
     private fun startProgressUpdates() {
